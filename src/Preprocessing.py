@@ -1,8 +1,7 @@
 from nltk.corpus import stopwords
-import pandas as pd
-import gensim
-import re 
-
+import re
+import gc
+import dask.dataframe as df
 # Assumption:
 # 1. All "RT @are" removed, topics should purely based on the context
 # 2. No need to process Captial or lower case since BERt handle this quite well
@@ -11,6 +10,15 @@ import re
 #   emojis are normally unsequenced, and the
 # 5. No need to remove punctuations since BERT was trained with punctuations,
 #   removing does not make differences
+# 6. remove id column, region column and unnamed column to save memory
+
+data_path = "../data/"
+file = ["Tweets_Indonesia",
+        "Tweets_Australia",
+        "Tweets_Brazil",
+        "Tweets_Japan",
+        "Tweets_UK",
+        "Tweets_US"]
 
 
 class preprocess():
@@ -38,7 +46,7 @@ class preprocess():
             u"\u231a"
             u"\ufe0f"  # dingbats
             u"\u3030"
-            "]+", re.UNICODE)
+              "]+", re.UNICODE)
         return emoji_pattern.sub(r'', tweet)
 
     def rt_remove(self, tweet):
@@ -60,10 +68,21 @@ class preprocess():
         return tweets
 
 
-df = pd.read_csv('../data/Tweets_Indonesia.csv', dtype={'text': str})
-df['text'] = df['text'].map(str)
-df['text'].fillna("")
-print(df.head())
-preprocess_class = preprocess()
-df['text'] = df['text'].apply(lambda x: preprocess_class.preprocess_tweet(x))
-
+for filename in file:
+    print("\nProcessing: " + filename + '\n')
+    ddf = df.read_csv(data_path + filename + '.csv',
+                      usecols=['created_at', 'text'],
+                      dtype={'text': "string[pyarrow]",
+                             'created_at': "string[pyarrow]"},
+                      lineterminator='\n',
+                      sep=',',
+                      quoting=3,
+                      on_bad_lines='skip')
+    ddf['text'] = ddf['text'].to_string()
+    ddf['text'].fillna("")
+    preprocess_class = preprocess()
+    ddf['text'] = ddf['text'].apply(lambda x:
+                                    preprocess_class.preprocess_tweet(x))
+    ddf.compute()
+    ddf.to_parquet(data_path + 'preprocess_' + filename + '.parquet',
+                   engine='pyarrow', overwrite=True, write_index=False)
